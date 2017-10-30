@@ -1,0 +1,154 @@
+
+Below are instructions for reproducing a working VPP environment on top of Marvell's Armada-7/8K SoCs
+The document below specifies the exact versions used for reproducing the system, however, different
+versions of these software components might be used, although, this might require some slight modifications
+to the installation process.
+
+1. Hardware:
+------------
+ - Armada-7/8K development / community board.
+   (For the purpose of this readme, a 8040-McBin board was used).
+ - Traffic generator (connected through the 10G ports).
+ - External network access (for github, packages installation...) - through
+   port 2 of McBin board (eth2).
+
+2. Basic board preps
+---------------------
+ - Boot the board using some temporary Kernel / DTB images (temporary, as it
+   will be replaced with a new Kernel in section #3).
+ - Use ubuntu-arm64 file-system (ubuntu-16.04 was used in our case).
+ - The following packages will be required during the installation process:
+   # apt-get update
+   # apt-get install git openssh-server make bc
+   # apt-get install autoconf automake libtool
+   # apt-get install ccache 
+   # apt-get install python python-six
+   # (optional) apt-get install xterm socat zip telnet
+
+3. MUSDK (part 1)
+-----------------
+ - Clone MUSDK code from github
+   # cd /root/
+   # git clone https://github.com/MarvellEmbeddedProcessors/musdk-marvell.git -b musdk-armada-17.10 musdk-marvell
+
+4. Kernel
+---------
+ - Clone Kernel code from github
+   # cd /root/
+   # git clone https://github.com/MarvellEmbeddedProcessors/linux-marvell.git -b linux-4.4.52-armada-17.10 linux-marvell
+ - Apply musdk kernel patches:
+   # cd linux-marvell
+   # git am /root/musdk-marvell/patches/linux/*.patch
+
+ - Configure and build the Kernel
+   # make mvebu_v8_lsp_defconfig
+   # make -j4 Image dtbs modules
+   # make modules_install
+   # make install
+   # cp arch/arm64/boot/Image arch/arm64/boot/dts/marvell/armada-8040-mcbin.dtb /boot/
+
+ - Reboot the system using the current kernel and device tree
+
+4. MUSDK (part 2)
+-----------------
+ - Configure & build musdk libraries / applications
+   # cd /root/musdk-marvell
+   # export KDIR=/root/linux-marvell
+   # ./bootstrap
+   # ./configure --enable-shared --enable-bpool-dma=64 --enable-bpool-cookie=32 --enable-sam --prefix=/usr
+   # make -j4
+   # make install
+ - Build & install MUSDK modules
+   # cd modules/
+   # for i in dmax2 neta pp2 sam uio; do cd $i; make; make -C $KDIR M=`pwd` modules_install; cd -; done
+
+5. pp2-sysfs driver
+-------------------
+ - Clone mvpp2-sysfs source code from github
+   # git clone https://github.com/MarvellEmbeddedProcessors/mvpp2x-marvell.git -b mvpp2x-armada-17.10 sysfs
+
+ - Build and install
+   # cd /root/sysfs/
+   # cp Makefile_sysfs Makefile
+   # export KDIR=/root/linux-marvell
+   # make
+   # make -C $KDIR M=`pwd` modules_install
+
+6. OpenVSwitch - stage 1
+------------------------
+ - Clone Marvell's OpenVswitch GIT
+   # cd /root/
+   # git clone https://github.com/MarvellEmbeddedProcessors/ovs-marvell.git -b ovs-devel ovs-marvell
+
+7. DPDK
+------------------------------------------------
+ - Clone Marvell's DPDK code
+   # cd /root/
+   # git clone https://github.com/MarvellEmbeddedProcessors/dpdk-marvell.git -b dpdk-17.05-armada-17.10 dpdk-marvell
+
+ - Apply DPDK fixes for OVS
+   # cd dpdk-marvell
+   # git am /root/ovs-marvell/dpdk-patches/*
+
+ - Build and install
+   # export LIBMUSDK_PATH=/usr
+   # export RTE_KERNELDIR=/root/linux/marvell
+   # export RTE_TARGET=arm64-armv8a-linuxapp-gcc
+   # make config T=arm64-armv8a-linuxapp-gcc
+   # make install
+
+8. OpenVSwitch
+--------------
+ - Clone Marvell's OpenVswitch GIT
+   # cd /root/
+   # git clone https://github.com/MarvellEmbeddedProcessors/ovs-marvell.git -b ovs-devel ovs-marvell
+
+ - Prepare build env
+   # cd vpp-marvell/
+   # ./bootstrap
+   # ./configure --with-dpdk LIBS="-ldl -lmusdk" --host=aarch64 
+   # make -j6 install
+
+ - Configure OpenvSwitch to use DPDK
+   # /usr/local/share/openvswitch/scripts/ovs-ctl start --no-ovs-vswitchd
+   # ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-init=true
+   # /usr/local/share/openvswitch/scripts/ovs-ctl stop
+
+
+9. Running NIC-OVS-NIC setup
+-----------------------------
+   - System setup
+      # modprobe -a musdk_uio mv_dmax2_uio mv_pp_uio mv_sam_uio mvpp2x
+      # mkdir /mnt/huge
+      # echo 1536 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
+      # mount hugetlbfs nodev /mnt/huge
+      # ip link set dev eth0 up
+      # ip link set dev eth1 up
+
+   - Start OVS and create a bridge
+      # /usr/local/share/openvswitch/scripts/ovs-ctl start
+      # ovs-vsctl ad-br br0 -- set bridge br0 datapath_type=netdev 
+
+   - Add 2 NICs for NIC-OVS-NIC setup
+      # ovs-vsctl add-port br0 dpdk0 -- set Interface dpdk0 type=dpdk options:dpdk-devargs=eth_mrvl0,iface=eth0
+      # ovs-vsctl add-port br0 dpdk1 -- set Interface dpdk1 type=dpdk options:dpdk-devargs=eth_mrvl1,iface=eth1
+
+   - verify the setup. run ovs-vsctl show. it should print
+    Bridge "br0"
+        Port "br0"
+            Interface "br0"
+                type: internal
+        Port "dpdk0"
+            Interface "dpdk0"
+                type: dpdk
+                options: {dpdk-devargs="eth_mrvl0,iface=eth0"}
+        Port "dpdk1"
+            Interface "dpdk1"
+                type: dpdk
+                options: {dpdk-devargs="eth_mrvl1,iface=eth1"}
+    ovs_version: "2.8.1"
+
+   - The system is ready to bridge traffic.
+   - make sure to send a single packet from each port so the switch can learn
+     the MAC per port (FIB table). Otherwise all traffic will go to slow path through
+     the kernel 
