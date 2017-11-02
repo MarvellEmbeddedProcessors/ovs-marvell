@@ -74,21 +74,11 @@ to the installation process.
    # make
    # make -C $KDIR M=`pwd` modules_install
 
-6. OpenVSwitch - stage 1
-------------------------
- - Clone Marvell's OpenVswitch GIT
-   # cd /root/
-   # git clone https://github.com/MarvellEmbeddedProcessors/ovs-marvell.git -b ovs-devel ovs-marvell
-
-7. DPDK
+6. DPDK
 ------------------------------------------------
  - Clone Marvell's DPDK code
    # cd /root/
    # git clone https://github.com/MarvellEmbeddedProcessors/dpdk-marvell.git -b dpdk-17.05-armada-17.10 dpdk-marvell
-
- - Apply DPDK fixes for OVS
-   # cd dpdk-marvell
-   # git am /root/ovs-marvell/dpdk-patches/*
 
  - Build and install
    # export LIBMUSDK_PATH=/usr
@@ -97,7 +87,7 @@ to the installation process.
    # make config T=arm64-armv8a-linuxapp-gcc
    # make install
 
-8. OpenVSwitch
+7. OpenVSwitch
 --------------
  - Clone Marvell's OpenVswitch GIT
    # cd /root/
