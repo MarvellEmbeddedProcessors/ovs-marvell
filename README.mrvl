@@ -5,7 +5,7 @@ versions of these software components might be used, although, this might requir
 to the installation process.
 
 1. Hardware:
-------------
+------------------------------------------------
  - Armada-7/8K development / community board.
    (For the purpose of this readme, a 8040-McBin board was used).
  - Traffic generator (connected through the 10G ports).
@@ -13,7 +13,7 @@ to the installation process.
    port 2 of McBin board (eth2).
 
 2. Basic board preps
----------------------
+------------------------------------------------
  - Boot the board using some temporary Kernel / DTB images (temporary, as it
    will be replaced with a new Kernel in section #3).
  - Use ubuntu-arm64 file-system (ubuntu-16.04 was used in our case).
@@ -26,13 +26,13 @@ to the installation process.
    # (optional) apt-get install xterm socat zip telnet
 
 3. MUSDK (part 1)
------------------
+------------------------------------------------
  - Clone MUSDK code from github
    # cd /root/
    # git clone https://github.com/MarvellEmbeddedProcessors/musdk-marvell.git -b musdk-armada-17.10 musdk-marvell
 
 4. Kernel
----------
+------------------------------------------------
  - Clone Kernel code from github
    # cd /root/
    # git clone https://github.com/MarvellEmbeddedProcessors/linux-marvell.git -b linux-4.4.52-armada-17.10 linux-marvell
@@ -47,10 +47,10 @@ to the installation process.
    # make install
    # cp arch/arm64/boot/Image arch/arm64/boot/dts/marvell/armada-8040-mcbin.dtb /boot/
 
- - Reboot the system using the current kernel and device tree
+ - Reboot the system using the newly built kernel and device tree
 
 4. MUSDK (part 2)
------------------
+------------------------------------------------
  - Configure & build musdk libraries / applications
    # cd /root/musdk-marvell
    # export KDIR=/root/linux-marvell
@@ -63,7 +63,7 @@ to the installation process.
    # for i in dmax2 neta pp2 sam uio; do cd $i; make; make -C $KDIR M=`pwd` modules_install; cd -; done
 
 5. pp2-sysfs driver
--------------------
+------------------------------------------------
  - Clone mvpp2-sysfs source code from github
    # git clone https://github.com/MarvellEmbeddedProcessors/mvpp2x-marvell.git -b mvpp2x-armada-17.10 sysfs
 
@@ -82,22 +82,24 @@ to the installation process.
 
  - Build and install
    # export LIBMUSDK_PATH=/usr
-   # export RTE_KERNELDIR=/root/linux/marvell
+   # export RTE_KERNELDIR=/root/linux-marvell
    # export RTE_TARGET=arm64-armv8a-linuxapp-gcc
    # make config T=arm64-armv8a-linuxapp-gcc
+   # make
    # make install
 
 7. OpenVSwitch
---------------
+------------------------------------------------
  - Clone Marvell's OpenVswitch GIT
    # cd /root/
    # git clone https://github.com/MarvellEmbeddedProcessors/ovs-marvell.git -b ovs-devel ovs-marvell
 
  - Prepare build env
-   # cd vpp-marvell/
-   # ./bootstrap
+   # cd ovs-marvell/
+   # ./boot.sh
    # ./configure --with-dpdk LIBS="-ldl -lmusdk" --host=aarch64 
-   # make -j6 install
+   # make -j6
+   # make install
 
  - Configure OpenvSwitch to use DPDK
    # /usr/local/share/openvswitch/scripts/ovs-ctl start --no-ovs-vswitchd
@@ -106,18 +108,18 @@ to the installation process.
 
 
 9. Running NIC-OVS-NIC setup
------------------------------
+------------------------------------------------
    - System setup
-      # modprobe -a musdk_uio mv_dmax2_uio mv_pp_uio mv_sam_uio mvpp2x
+      # modprobe -a musdk_uio mv_dmax2_uio mv_pp_uio mv_sam_uio mvpp2x_sysfs
       # mkdir /mnt/huge
-      # echo 1536 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
-      # mount hugetlbfs nodev /mnt/huge
+      # echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
+      # mount -t hugetlbfs nodev /mnt/huge
       # ip link set dev eth0 up
       # ip link set dev eth1 up
 
    - Start OVS and create a bridge
       # /usr/local/share/openvswitch/scripts/ovs-ctl start
-      # ovs-vsctl ad-br br0 -- set bridge br0 datapath_type=netdev 
+      # ovs-vsctl add-br br0 -- set bridge br0 datapath_type=netdev 
 
    - Add 2 NICs for NIC-OVS-NIC setup
       # ovs-vsctl add-port br0 dpdk0 -- set Interface dpdk0 type=dpdk options:dpdk-devargs=eth_mrvl0,iface=eth0
