@@ -73,6 +73,7 @@ EXTRA_DIST = \
 	CONTRIBUTING.rst \
 	MAINTAINERS.rst \
 	README.rst \
+	README.mrvl \
 	NOTICE \
 	.travis.yml \
 	.travis/linux-build.sh \
