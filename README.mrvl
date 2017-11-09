@@ -21,7 +21,7 @@ to the installation process.
    # apt-get update
    # apt-get install git openssh-server make bc
    # apt-get install autoconf automake libtool
-   # apt-get install ccache 
+   # apt-get install ccache
    # apt-get install python python-six
    # (optional) apt-get install xterm socat zip telnet
 
@@ -97,7 +97,7 @@ to the installation process.
  - Prepare build env
    # cd ovs-marvell/
    # ./boot.sh
-   # ./configure --with-dpdk LIBS="-ldl -lmusdk" --host=aarch64 
+   # ./configure --with-dpdk LIBS="-ldl -lmusdk" --host=aarch64
    # make -j6
    # make install
 
@@ -108,8 +108,8 @@ to the installation process.
 
 
 9. Running NIC-OVS-NIC setup
-------------------------------------------------
-   - System setup
+----------------------------
+  9.1 System setup
       # modprobe -a musdk_uio mv_dmax2_uio mv_pp_uio mv_sam_uio mvpp2x_sysfs
       # mkdir /mnt/huge
       # echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
@@ -117,15 +117,15 @@ to the installation process.
       # ip link set dev eth0 up
       # ip link set dev eth1 up
 
-   - Start OVS and create a bridge
+  9.2 Start OVS and create a bridge
       # /usr/local/share/openvswitch/scripts/ovs-ctl start
-      # ovs-vsctl add-br br0 -- set bridge br0 datapath_type=netdev 
+      # ovs-vsctl add-br br0 -- set bridge br0 datapath_type=netdev
 
-   - Add 2 NICs for NIC-OVS-NIC setup
+  9.2 Add 2 NICs for NIC-OVS-NIC setup
       # ovs-vsctl add-port br0 dpdk0 -- set Interface dpdk0 type=dpdk options:dpdk-devargs=eth_mrvl0,iface=eth0
       # ovs-vsctl add-port br0 dpdk1 -- set Interface dpdk1 type=dpdk options:dpdk-devargs=eth_mrvl1,iface=eth1
 
-   - verify the setup. run ovs-vsctl show. it should print
+  9.3 verify the setup. run ovs-vsctl show. it should print
     Bridge "br0"
         Port "br0"
             Interface "br0"
@@ -143,4 +143,187 @@ to the installation process.
    - The system is ready to bridge traffic.
    - make sure to send a single packet from each port so the switch can learn
      the MAC per port (FIB table). Otherwise all traffic will go to slow path through
-     the kernel 
+     the kernel
+
+
+10. Running single VM bridging setup
+-----------------------------------
+This setup has the path NIC-OVS-VM-OVS-NIC
+
+   10.1 System setup - use section 9.1 above
+
+   10.2 OVS setup - start OVS and create 2 bridges, each with vhost-user and NIC ports
+      # /usr/local/share/openvswitch/scripts/ovs-ctl start
+      # ovs-vsctl add-br br0 -- set bridge br0 datapath_type=netdev
+      # ovs-vsctl add-br br1 -- set bridge br1 datapath_type=netdev
+      # ovs-vsctl add-port br0 dpdk0 -- set Interface dpdk0 type=dpdk options:dpdk-devargs=eth_mrvl0,iface=eth0
+      # ovs-vsctl add-port br0 vhost-user0 -- set Interface vhost-user0 type=dpdkvhostuser
+      # ovs-vsctl add-port br1 dpdk1 -- set Interface dpdk1 type=dpdk options:dpdk-devargs=eth_mrvl1,iface=eth1
+      # ovs-vsctl add-port br1 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuser
+
+  10.3 verify the setup. run ovs-vsctl show. it should print
+    Bridge "br0"
+        Port "vhost-user0"
+            Interface "vhost-user0"
+                type: dpdkvhostuser
+        Port "br0"
+            Interface "br0"
+                type: internal
+        Port "dpdk0"
+            Interface "dpdk0"
+                type: dpdk
+                options: {dpdk-devargs="eth_mrvl0,iface=eth0"}
+    Bridge "br1"
+        Port "br1"
+            Interface "br1"
+                type: internal
+        Port "dpdk1"
+            Interface "dpdk1"
+                type: dpdk
+                options: {dpdk-devargs="eth_mrvl1,iface=eth1"}
+        Port "vhost-user1"
+            Interface "vhost-user1"
+                type: dpdkvhostuser
+    ovs_version: "2.8.1"
+
+   10.4 VM environment setup
+    - Install QEMU and screen
+	# apt-get install qemu-system-aarch64 screen python
+
+    - Prepare VM linux image
+       # cd /root/linux-marvell
+       # git am /root/ovs-marvell/linux-guest-patches/*
+       # ./scripts/config -e VFIO_NOIOMMU
+       # ./scripts/config -e VFIO_NOIOMMU
+       # make -j6
+       # cp arch/arm64/boot/Image /boot/Image-vm
+
+    - Prepare ubuntu-16.04 file system image for the guest VM
+       # dd if=/dev/zero of=/root/ubuntu-16.04-vm-fs.img bs=1M count=2000
+       # mkfs.ext4 /root/ubuntu-16.04-vm-fs.img
+       # mkdir /mnt/loop
+       # mount /root/ubuntu-16.04-vm-fs.img /mnt/loop
+       # cd /mnt/loop
+       # tar -xf /root/ubuntu-16.04-arm64.tar
+       # cp /root/dpdk-marvell /mnt/loop/root/.
+
+    - Install packages for VM file system
+       # chroot /mnt/loop
+       # dhclient eth2
+       # apt-get update
+       # apt-get install build-essential pciutils
+
+    - Compile DPDK for VM
+      - Disable KNI and MRVL PMD in config file
+         - open config/common_linuxapp and delete CONFIG_RTE_KNI_KMOD
+         - open config/common_base and delete
+	    - CONFIG_RTE_LIBRTE_MRVL_PMD
+	    - CONFIG_RTE_LIBRTE_MRVL_DEBUG
+	    - CONFIG_RTE_MRVL_MUSDK_DMA_MEMSIZE
+	    - CONFIG_RTE_LIBRTE_PMD_MRVL_CRYPTO
+	    - CONFIG_RTE_LIBRTE_PMD_MRVL_CRYPTO_DEBUG
+      - Build DPDK
+	 # make config T=arm64-armv8a-linuxapp-gcc
+	 # make
+	 # make install
+
+   10.5 Boot the VM
+      - Start screen application and create a 2nd terminal
+	   # screen
+           # Ctrl-a c   " open 2nd terminal "
+	   # Ctrl-a 1   " switch to 2nd terminal"
+      - Boot VM with QEMU
+	   # qemu-system-aarch64 -enable-kvm -nographic -kernel /boot/Image-vm -m 768 -M virt,iommu=on -cpu host -smp 2\
+	        -drive file=/root/ubuntu-16.04-vm-fs.img,id=fs,if=none,format=raw -device virtio-blk-device,drive=fs \
+	        -chardev socket,id=char0,path=/usr/local/var/run/openvswitch/vhost-user0 \
+	        -netdev type=vhost-user,id=net0,chardev=char0,vhostforce  \
+	        -device virtio-net-pci,mac=00:00:00:00:00:10,netdev=net0 \
+	        -chardev socket,id=char1,path=/usr/local/var/run/openvswitch/vhost-user1 \
+	        -netdev type=vhost-user,id=net1,chardev=char1,vhostforce \
+	        -device virtio-net-pci,mac=00:00:00:00:00:11,netdev=net1 \
+	        -object memory-backend-file,share=on,id=mem,size=768M,mem-path=/dev/hugepages \
+	        -numa node,memdev=mem -mem-prealloc \
+	        -append "earlyprintk console=ttyAMA0 rootwait root=/dev/vda rw"
+
+       - Verify Virtio PCI devices exist. lspci should show
+		00:00.0 Host bridge: Red Hat, Inc. Device 0008
+		00:01.0 Ethernet controller: Red Hat, Inc Virtio network device
+		00:02.0 Ethernet controller: Red Hat, Inc Virtio network device
+
+    10.6 Run DPDK on VM
+       - system setup
+          # echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
+          # mkdir /mnt/huge
+          # mount -t hugetlbfs nodev /mnt/huge
+          # echo 1 > /sys/module/vfio/parameters/enable_unsafe_noiommu_mode
+          # dpdk-devbind -b vfio-pci 0000:00:01.0
+          # dpdk-devbind -b vfio-pci 0000:00:02.0
+
+       - dpdk run
+          # testpmd -c 0x3 -- -i -a --total-num-mbufs=16384
+
+     The system is now ready to bridge traffic.
+     Back on the hypervisor, check that you have 2 threads occupying 100% CPU.
+     Make sure none of these threads is running on CPU-0. If one of them does,
+     move it to CPUs 1,2, or 3 using taskset.
+
+
+11. Running dual VM bridging setup
+-----------------------------------
+This setup has the path NIC-OVS-VM-OVS-VM-OVS-NIC
+
+First follow all the steps of section 10
+Then follow these steps
+
+    11.1 OVS setup
+      - Create additional bridge for VM-2-VM traffic
+        # ovs-vsctl add-br br2 -- set bridge br2 datapath_type=netdev
+        # ovs-vsctl add-port br2 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuser
+        # ovs-vsctl add-port br2 vhost-user3 -- set Interface vhost-user3 type=dpdkvhostuser
+
+      - verify the setup. run ovs-vsctl show. it should print
+	    Bridge "br2"
+	        Port "br2"
+	            Interface "br2"
+	                type: internal
+	        Port "vhost-user3"
+	            Interface "vhost-user3"
+	                type: dpdkvhostuser
+	        Port "vhost-user2"
+	            Interface "vhost-user2"
+	                type: dpdkvhostuser
+	    Bridge "br0"
+	        Port "vhost-user0"
+	            Interface "vhost-user0"
+	                type: dpdkvhostuser
+	        Port "br0"
+	            Interface "br0"
+	                type: internal
+	        Port "dpdk0"
+	            Interface "dpdk0"
+	                type: dpdk
+	                options: {dpdk-devargs="eth_mrvl0,iface=eth0"}
+	    Bridge "br1"
+	        Port "br1"
+	            Interface "br1"
+	                type: internal
+	        Port "dpdk1"
+	            Interface "dpdk1"
+	                type: dpdk
+	                options: {dpdk-devargs="eth_mrvl1,iface=eth1"}
+	        Port "vhost-user1"
+	            Interface "vhost-user1"
+	                type: dpdkvhostuser
+
+
+    11.2 Boot both VMs
+       - open 3 "screen" terminals: one for hypervisor and one for each VM
+       - boot both VMs by running the QEMU command in section 10.5 with the following changes
+           - VM 0 should use vhost-user0 and vhost-user2
+	   - VM 0 should use mac addresses ending in 10 and 12
+           - VM 1 should use vhost-user1 and vhost-user3
+	   - VM 1 should use mac addresses ending in 11 and 13
+
+    11.3 On both VMs start testpmd according to instructions in section 10.6
+
+     The system is now ready to pass traffic
