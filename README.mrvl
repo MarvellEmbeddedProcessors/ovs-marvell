@@ -243,7 +243,7 @@ This setup has the path NIC-OVS-VM-OVS-NIC
 	        -device virtio-net-pci,mac=00:00:00:00:00:11,netdev=net1 \
 	        -object memory-backend-file,share=on,id=mem,size=768M,mem-path=/dev/hugepages \
 	        -numa node,memdev=mem -mem-prealloc \
-	        -append "earlyprintk console=ttyAMA0 rootwait root=/dev/vda rw"
+	        -append "earlyprintk console=ttyAMA0 isolcpus=1 rootwait root=/dev/vda rw"
 
        - Verify Virtio PCI devices exist. lspci should show
 		00:00.0 Host bridge: Red Hat, Inc. Device 0008
@@ -252,7 +252,8 @@ This setup has the path NIC-OVS-VM-OVS-NIC
 
     10.6 Run DPDK on VM
        - system setup
-          # echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
+          # init s  /*  to eliminate un-needed processes from ubuntu */
+	  # echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
           # mkdir /mnt/huge
           # mount -t hugetlbfs nodev /mnt/huge
           # echo 1 > /sys/module/vfio/parameters/enable_unsafe_noiommu_mode
@@ -317,13 +318,16 @@ Then follow these steps
 
 
     11.2 Boot both VMs
-       - open 3 "screen" terminals: one for hypervisor and one for each VM
-       - boot both VMs by running the QEMU command in section 10.5 with the following changes
-           - VM 0 should use vhost-user0 and vhost-user2
-	   - VM 0 should use mac addresses ending in 10 and 12
-           - VM 1 should use vhost-user1 and vhost-user3
-	   - VM 1 should use mac addresses ending in 11 and 13
+       - Open 3 "screen" terminals: one for hypervisor and one for each VM
+       - Boot both VMs by running the QEMU command in section 10.5 with the following changes
+           - VM 0 should use vhost-user0, vhost-user2 and mac addresses ending in 10 and 12
+           - VM 1 should use vhost-user1, vhost-user3, and mac addresses ending in 11 and 13
+	   - VM 1 should use a different file-system image. copy ubuntu-16.04-vm-fs.img and pass the new
+             file as VM1 file system
 
     11.3 On both VMs start testpmd according to instructions in section 10.6
 
      The system is now ready to pass traffic
+     Back on the hypervisor, check that you have 3 threads occupying 100% CPU.
+     Make sure none of these threads is running on CPU-0. If one of them does,
+     move it to CPUs 1,2, or 3 using taskset.
